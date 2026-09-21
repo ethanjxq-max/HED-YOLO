@@ -1,0 +1,15 @@
+# NEU-DET（热轧带钢表面缺陷，6 类）
+# 用法：把 path 改成你自己的数据集根目录（正斜杠），目录结构需为
+#   <path>/images/{train,val}/*.jpg
+#   <path>/labels/{train,val}/*.txt
+path: /path/to/NEU-DET
+train: images/train
+val: images/val
+
+names:
+  0: crazing
+  1: inclusion
+  2: patches
+  3: pitted_surface
+  4: rolled-in_scale
+  5: scratches

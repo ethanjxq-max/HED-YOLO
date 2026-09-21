@@ -1,0 +1,71 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# YOLO26s + DB + FEM + C2PSA修复 + P2 高分辨率细目标旁路分支（实验24·支路式）
+# ==================================================================
+# 设计依据（2026-09-11，7 组浅层增强实验的失败归因）：
+#   痛点①：细目标类（crazing/scratches/pitted，占验证实例 43.5%）是全场最大短板，
+#          其根源是分辨率——crazing 裂纹 1~3px 在 P3(stride 8) 上已接近亚像素；
+#   痛点②：P3/P4 上"修改已有特征"的 7 组尝试（WDM/WSDM/LDTE×4/SGDE）全部
+#          "块状类涨、细目标类崩"→ 推理：**不得再修改既有特征路径**；
+#   设计决策：新增 P2/stride-4 高分辨率检测分支，且采用"**旁路式**"而非官方
+#          链式 P2——主链（P3/P4/P5）与 E 基座(0.743/0.388)逐行一致，P2 支路
+#          从 P3 输出层分出（上采样×2）与 backbone P2 细节拼接：
+#          · 主链零改动 → 杜绝类间冲突（7 组实验教训的直接应用）；
+#          · P2 支路输入为 P3 级融合特征（已具语义）+ backbone P2 细节（高分辨）；
+#          · 官方链式 P2 会弱化 P3 输出层融合输入(512ch→192ch)，本设计规避。
+#   单变量：与 E 基座相比，唯一变化 = 新增 P2 支路（Upsample+Concat+C3k2+Detect 第4分支）。
+
+# Parameters
+nc: 6 # number of classes
+end2end: True # whether to use end-to-end mode
+reg_max: 1 # DFL bins
+scales:
+  # [depth, width, max_channels]
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]] # 2（保持官方，同 E 基座；供 P2 支路）
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 2, C3k2_DB, [512, False, 0.25]] # 4（DB）
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
+  - [-1, 2, C3k2_DB, [512, True]] # 6（DB）
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
+  - [-1, 2, C3k2_DB, [1024, True]] # 8（DB）
+  - [-1, 1, FEM, [1024, 4]] # 9（FEM①）
+  - [-1, 1, SPPF, [1024, 5, 3, True]] # 10
+  - [-1, 2, C2PSA, [1024]] # 11
+
+head:
+  # ===== 主链（与 E 基座 yolo26s_db_fem_11_13.yaml 逐行一致，一行未改动）=====
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 12
+  - [[-1, 6], 1, Concat, [1]] # 13 cat backbone P4
+  - [-1, 2, C3k2, [512, True]] # 14
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 15
+  - [[-1, 4], 1, Concat, [1]] # 16 cat backbone P3
+  - [-1, 2, C3k2, [256, True]] # 17 (P3/8-small) ← 主链 P3 输出（不变）
+
+  - [-1, 1, Conv, [256, 3, 2]] # 18
+  - [[-1, 13], 1, Concat, [1]] # 19 cat head P4（宽融合，实验E2证明保留）
+  - [-1, 2, C3k2, [512, True]] # 20 (P4/16-medium) ← 主链 P4 输出（不变）
+
+  - [-1, 1, Conv, [512, 3, 2]] # 21
+  - [[-1, 11], 1, Concat, [1]] # 22 cat head P5（C2PSA 语义供给，实验E修复）
+  - [-1, 1, C3k2_DB, [1024, True, 0.5, True]] # 23
+  - [-1, 1, FEM, [1024, 4]] # 24 (P5/32-large) ← 主链 P5 输出（不变）
+
+  # ===== P2 高分辨率旁路分支（本次唯一新增，不修改任何主链路径）=====
+  - [17, 1, nn.Upsample, [None, 2, "nearest"]] # 25 从 P3 输出上采样 80→160
+  - [[-1, 2], 1, Concat, [1]] # 26 cat backbone P2（高分辨率细节）
+  - [-1, 2, C3k2, [256, True]] # 27 (P2/4-xsmall) ← 新增检测分支（128ch，与 P3 同级：
+  #                               Detect 的 hidden 由 ch[0] 决定，P2=128ch 可保持
+  #                               c2/c3 与 E 基座一致，避免检测头被削弱）
+
+  - [[27, 17, 20, 24], 1, Detect, [nc]] # Detect(P2, P3, P4, P5)

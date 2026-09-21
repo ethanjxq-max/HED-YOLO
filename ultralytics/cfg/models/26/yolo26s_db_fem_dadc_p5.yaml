@@ -1,0 +1,65 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# YOLO26s + DB + FEM + DADC@P5（改进点③ 最小改动版：只换 P5 深层块）
+# ==================================================================
+# 改进点③：DADC（Direction-Aware Deformable Convolution，方向感知可变形卷积）
+#   把①号改进点 C3k2_DB 里的"固定网格 3×3 卷积"**就地**换成方向解耦偏移的可变形卷积：
+#     · x 方向偏移 ← 水平条形卷积(1×k) 生成；y 方向偏移 ← 垂直条形卷积(k×1) 生成
+#       （标准 DCN 用单个 3×3 同时生成 dx/dy，偏移场各向同性，对细长/曲折缺陷不是最优参数化）
+#     · 偏移场 tanh 有界化（|offset| ≤ 2 像素）、偏移生成器零初始化 → 训练起点与 E 基座
+#       **逐位等价**（本地已验证：同步权重后两版本输出差异 = 0.00e+00）
+#   **不新增任何通路**：层数、通道、分辨率、拼接关系全部不变，只换卷积核 →
+#   规避本项目 15 组第三点实验的共同死因（新增信息通路 → 细目标类被稀释：
+#   scratches mAP50-95 12/12 下降、pitted 11/12 下降）。
+#   文献：DCNv4(arXiv 2401.06197)、InternImage(CVPR 2023)、DCAM-Net(IEEE TIM 2023,
+#         同 NEU-DET 数据集, CLAHE+可变形卷积 82.6 mAP50)、DSConv(ICCV 2023, 细长结构)。
+#   消融对照行（论文用）：offset_mode='standard' = 标准 DCN（单 3×3 偏移生成器）
+#   结构改动：仅 backbone 第 8 层 C3k2_DB → C3k2_DB_DADC（20×20）
+# ==================================================================
+# Parameters
+nc: 6 # number of classes
+end2end: True # whether to use end-to-end mode
+reg_max: 1 # DFL bins
+scales: # model compound scaling constants, i.e. 'model=yolo26n.yaml' will call yolo26.yaml with scale 'n'
+  # [depth, width, max_channels]
+  n: [0.50, 0.25, 1024] # summary: 260 layers, 2,572,280 parameters, 2,572,280 gradients, 6.1 GFLOPs
+  s: [0.50, 0.50, 1024] # summary: 260 layers, 10,009,784 parameters, 10,009,784 gradients, 22.8 GFLOPs
+  m: [0.50, 1.00, 512] # summary: 280 layers, 21,896,248 parameters, 21,896,248 gradients, 75.4 GFLOPs
+  l: [1.00, 1.00, 512] # summary: 392 layers, 26,299,704 parameters, 26,299,704 gradients, 93.8 GFLOPs
+  x: [1.00, 1.50, 512] # summary: 392 layers, 58,993,368 parameters, 58,993,368 gradients, 209.5 GFLOPs
+
+# YOLO26n backbone
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [-1, 2, C3k2_DB, [512, False, 0.25]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 2, C3k2_DB, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]
+  - [-1, 2, C3k2_DB_DADC, [1024, True]]  # 8 ← DB→DADC（P5/32，最深处、参数最省）
+  - [ -1, 1, FEM, [ 1024, 4 ] ]
+  - [-1, 1, SPPF, [1024, 5, 3, True]]
+  - [-1, 2, C2PSA, [1024]] #11
+
+# YOLO26n head
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 6], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, True]]
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 4], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, True]]
+
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 13], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, True]]
+
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 11], 1, Concat, [1]]
+  - [-1, 1, C3k2_DB, [1024, True, 0.5, True]]  # attn=True → 内部 Bottleneck_DB+PSABlock
+  - [-1, 1, FEM, [1024, 4]]
+  - [[17, 20, 24], 1, Detect, [nc]]

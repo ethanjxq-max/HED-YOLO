@@ -1,0 +1,18 @@
+# GC10-DET（钢带表面缺陷，10 类）
+# 由 scripts/data/convert_gc10det.py 转换后生成 gc10det.yaml（带绝对路径），
+# 也可直接改本文件的 path 使用。
+path: /path/to/GC10-DET
+train: images/train
+val: images/val
+
+names:
+  0: 1_chongkong
+  1: 2_hanfeng
+  2: 3_yueyawan
+  3: 4_shuiban
+  4: 5_youban
+  5: 6_siban
+  6: 7_yiwu
+  7: 8_yahen
+  8: 9_zhehen
+  9: 10_yaozhe
