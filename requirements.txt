@@ -1,0 +1,24 @@
+# HED-YOLO — dependencies
+#
+# This repository contains only the code written for this project. It is an
+# OVERLAY on Ultralytics 8.4.137, not a standalone package, so installation is
+# two steps:
+#
+#     pip install ultralytics==8.4.137
+#     ./apply.sh
+#
+# Pinning the upstream version matters: the overlay patches specific upstream
+# files and will not apply cleanly to a different release.
+
+ultralytics==8.4.137
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.23.0
+opencv-python>=4.7.0
+pillow>=9.0.0
+pyyaml>=5.3.1
+matplotlib>=3.3.0
+requests>=2.23.0
+psutil>=5.8.0
+polars>=0.20.0
+ultralytics-thop>=2.1.6
